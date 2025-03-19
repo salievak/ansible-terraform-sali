@@ -1,0 +1,123 @@
+---
+- name: Configure web servers
+  hosts: all
+  become: yes
+  vars:
+    neighbours:
+      debian: "{{ groups['ubuntu'] | map('extract', hostvars, ['ansible_default_ipv4', 'address']) | list }}"
+      ubuntu: "{{ groups['debian'] | map('extract', hostvars, ['ansible_default_ipv4', 'address']) | list }}"
+  tasks:
+    - name: Add hostname and neighbor IP to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ hostvars[item].ansible_host }} {{ item }}"
+        state: present
+      with_items: "{{ groups['all'] | difference([inventory_hostname]) }}"
+      when: hostvars[item].ansible_host is defined
+
+    - name: Ensure APT is not locked
+      shell: |
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+          sleep 3
+        done
+      changed_when: false
+      when: ansible_os_family == "Debian"
+
+    - name: Update APT package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install Certbot via Snap (Ubuntu)
+      block:
+        - name: Install snapd
+          apt:
+            name: snapd
+            state: present
+        
+        - name: Enable snapd socket
+          systemd:
+            name: snapd.socket
+            state: started
+            enabled: yes
+        
+        - name: Install certbot
+          snap:
+            name: certbot
+            classic: yes
+        
+   #     - name: Create symlink
+   #       file:
+   #         src: /snap/bin/certbot
+   #         dest: /usr/bin/certbot
+   #         state: link
+   #   when: ansible_distribution == "Ubuntu"
+
+    - name: Verify Certbot installation
+      command: certbot --version
+      register: certbot_version
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Install packages (Debian)
+      apt:
+        name:
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+        state: present
+      register: debian_install
+      until: debian_install is succeeded
+      retries: 5
+      delay: 10
+      when: ansible_os_family == "Debian"
+
+    - name: Ensure Nginx is running
+      service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Generate index.html
+      template:
+        src: index.html.j2
+        dest: /var/www/html/index.html
+      vars:
+        neighbours: "{{ neighbours[inventory_hostname.split('-')[0]] }}"
+
+    - name: Deploy Nginx config for Debian
+      template:
+        src: nginx-debian.conf.j2
+        dest: /etc/nginx/sites-enabled/debian.ksalieva06.pp.ua
+      when: ansible_distribution == "Debian"
+      notify: restart nginx
+
+    - name: Deploy Nginx config for Ubuntu
+      template:
+        src: nginx-ubuntu.conf.j2
+        dest: /etc/nginx/sites-enabled/ubuntu.ksalieva06.pp.ua
+      when: ansible_distribution == "Ubuntu"
+      notify: restart nginx
+
+    - name: Check Certbot availability
+      command: which certbot
+      register: certbot_check
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Get SSL certificate
+      command: "certbot --nginx -d {{ inventory_hostname.split('-')[0] }}.ksalieva06.pp.ua --non-interactive --agree-tos -m katesalieva4685@gmail.com"
+      when: certbot_check.rc == 0
+
+    - name: Validate nginx config
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+      failed_when: nginx_test.rc != 0
+
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted

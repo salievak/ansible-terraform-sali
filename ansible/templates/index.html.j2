@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Server Info</title>
+</head>
+<body>
+    <h1>Server Information</h1>
+    <p>Hostname: {{ inventory_hostname }}</p>
+    <p>OS: {{ ansible_distribution }} {{ ansible_distribution_version }}</p>
+    <p>IP Address: {{ ansible_default_ipv4.address }}</p>
+    <p>Neighbor IPs: {{ groups['all'] | difference([inventory_hostname]) | map('extract', hostvars, ['ansible_host']) | join(', ') }}</p>
+    <ul>
+  {% for host in groups['all'] %}
+    {% if host != inventory_hostname %}
+      <li><a href="http://{{ hostvars[host].ansible_host }}">{{ host }}</a></li>
+    {% endif %}
+  {% endfor %}
+  </ul>
+    <p>Last updated: {{ ansible_date_time.iso8601 }}</p>
+</body>
+</html>
