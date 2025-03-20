@@ -5,6 +5,7 @@
 - installing the gcloud cli and setting up a profile
 - install Terraform on your device
 - install Ansible on your device
+- configured SSH keys for logging into instances
 
 # Files that describe the creation and configuration of the infrastructure:
 ```
